@@ -1,0 +1,16 @@
+# dependencies (re-create with `npm install`)
+node_modules/
+
+# packaged output (re-create with `npx streamdeck pack ...`)
+dist/
+*.streamDeckPlugin
+
+# logs / OS cruft
+*.log
+.DS_Store
+Thumbs.db
+
+# NOTE: com.local.claude-usage.sdPlugin/bin/plugin.js IS committed on purpose,
+# so the plugin installs/packs without anyone needing to build first.
+# If you'd rather keep a build-only repo, add this line:
+# com.local.claude-usage.sdPlugin/bin/

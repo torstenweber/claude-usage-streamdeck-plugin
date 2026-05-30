@@ -17,6 +17,10 @@ import {
   svgKey,
   toDataUri,
   num,
+  getLogStats,
+  fmtTokens,
+  fmtCost,
+  svgStat,
 } from "./usage-core";
 
 type Settings = {
@@ -26,13 +30,21 @@ type Settings = {
   userAgent?: string;
 };
 
+const ACCENT = "#d97757"; // Claude coral, used on stat tiles
+const LOG_METRICS = new Set(["tokens_today", "cost_today", "tokens_session", "cost_session"]);
+
 // Every visible key instance, so the refresh loop can repaint all of them.
 const visible = new Set<any>();
 
 async function draw(act: any, s: Settings): Promise<void> {
+  const metric = s.metric || "session";
+  if (LOG_METRICS.has(metric)) return drawStat(act, metric);
+  return drawGauge(act, s, metric);
+}
+
+async function drawGauge(act: any, s: Settings, metric: string): Promise<void> {
   const ua = (s.userAgent && s.userAgent.trim()) || DEFAULT_UA;
   const { data, error } = await fetchUsage(ua, false); // honors the shared cache
-  const metric = s.metric || "session";
   const warn = num(s.warn, 50);
   const crit = num(s.crit, 80);
 
@@ -53,9 +65,35 @@ async function draw(act: any, s: Settings): Promise<void> {
   );
 }
 
+async function drawStat(act: any, metric: string): Promise<void> {
+  const stats = await getLogStats(false); // honors its own 30s cache
+  if (!stats.ok) {
+    await act.setImage(
+      toDataUri(svgStat({ label: "Claude", value: "--", sub: "no logs", accent: ACCENT, stale: true })),
+    );
+    return;
+  }
+
+  let label = "Tokens";
+  let value = "--";
+  let sub = "today";
+  if (metric === "tokens_today") {
+    label = "Tokens"; value = fmtTokens(stats.todayTokens); sub = "today";
+  } else if (metric === "cost_today") {
+    label = "Cost"; value = fmtCost(stats.todayCost); sub = "today";
+  } else if (metric === "tokens_session") {
+    label = "Tokens"; value = fmtTokens(stats.sessionTokens); sub = "session";
+  } else if (metric === "cost_session") {
+    label = "Cost"; value = fmtCost(stats.sessionCost); sub = "session";
+  }
+  await act.setImage(
+    toDataUri(svgStat({ label, value, sub, accent: ACCENT, stale: false })),
+  );
+}
+
 async function refreshAll(force: boolean): Promise<void> {
-  // One network call refreshes the cache; then repaint every visible key.
-  await fetchUsage(DEFAULT_UA, force);
+  // Refresh both data sources once, then repaint every visible key from cache.
+  await Promise.allSettled([fetchUsage(DEFAULT_UA, force), getLogStats(force)]);
   for (const act of visible) {
     try {
       const s = (await act.getSettings()) as Settings;

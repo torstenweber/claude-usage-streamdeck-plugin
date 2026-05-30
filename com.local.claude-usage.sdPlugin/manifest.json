@@ -2,9 +2,9 @@
   "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
   "UUID": "com.local.claude-usage",
   "Name": "Claude Usage",
-  "Version": "1.0.0.0",
+  "Version": "1.1.0.0",
   "Author": "Community",
-  "Description": "Shows your Claude session (5h) and weekly (7d) usage limits on Stream Deck keys — the same data Claude Code's /usage command displays.",
+  "Description": "Shows Claude usage on Stream Deck keys: live session (5h) & weekly (7d) limits from /usage, plus tokens and cost parsed from local Claude Code logs. Windows + macOS.",
   "Category": "Claude Usage",
   "CategoryIcon": "imgs/category-icon",
   "Icon": "imgs/plugin-icon",
@@ -16,6 +16,10 @@
     {
       "Platform": "windows",
       "MinimumVersion": "10"
+    },
+    {
+      "Platform": "mac",
+      "MinimumVersion": "12"
     }
   ],
   "Nodejs": {
@@ -28,7 +32,7 @@
       "Name": "Claude Usage",
       "UUID": "com.local.claude-usage.meter",
       "Icon": "imgs/actions/meter/icon",
-      "Tooltip": "Show a Claude usage meter (Session 5h / Weekly 7d / Opus / Sonnet).",
+      "Tooltip": "Show a Claude usage meter: Session/Weekly limits, or tokens/cost (today or session).",
       "PropertyInspectorPath": "ui/inspector.html",
       "Controllers": [
         "Keypad"

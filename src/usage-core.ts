@@ -1,5 +1,7 @@
 // usage-core.ts — data + rendering logic, no Stream Deck SDK dependency.
 import { readFileSync } from "node:fs";
+import { readdir, readFile, stat } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -30,14 +32,40 @@ export function credentialsPath(): string {
 }
 
 export function readToken(): { token?: string; expired?: boolean } {
+  // macOS keeps the OAuth token in the login Keychain, not on disk.
+  if (process.platform === "darwin") {
+    const fromKeychain = readTokenFromKeychain();
+    if (fromKeychain.token) return fromKeychain;
+    // fall through to the file in case this machine also has one
+  }
+  return readTokenFromFile();
+}
+
+function parseCred(raw: string): { token?: string; expired?: boolean } {
+  const j = JSON.parse(raw);
+  const o = (j && j.claudeAiOauth) || {};
+  const token: string | undefined = o.accessToken;
+  const expiresAt = Number(o.expiresAt || 0);
+  const expired = expiresAt > 0 && Date.now() > expiresAt;
+  return { token, expired };
+}
+
+function readTokenFromFile(): { token?: string; expired?: boolean } {
   try {
-    const raw = readFileSync(credentialsPath(), "utf8");
-    const j = JSON.parse(raw);
-    const o = (j && j.claudeAiOauth) || {};
-    const token: string | undefined = o.accessToken;
-    const expiresAt = Number(o.expiresAt || 0);
-    const expired = expiresAt > 0 && Date.now() > expiresAt;
-    return { token, expired };
+    return parseCred(readFileSync(credentialsPath(), "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function readTokenFromKeychain(): { token?: string; expired?: boolean } {
+  try {
+    const out = execFileSync(
+      "security",
+      ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
+      { encoding: "utf8", timeout: 4000 },
+    );
+    return parseCred(out.trim());
   } catch {
     return {};
   }
@@ -158,4 +186,215 @@ export function svgKey(opts: {
 
 export function toDataUri(svg: string): string {
   return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
+}
+
+// ---------------------------------------------------------------------------
+// Local-log metrics: tokens / cost parsed from Claude Code's JSONL transcripts.
+//
+// Caveat: Claude Code currently under-records input_tokens/output_tokens in the
+// JSONL (a known upstream bug); cache token counts are accurate. For cost we
+// therefore prefer the per-entry `costUSD` Claude Code writes, and only fall
+// back to computing from tokens (which makes the estimate a lower bound). For
+// subscription (Pro/Max) users this cost is notional "equivalent API spend",
+// not an actual charge.
+// ---------------------------------------------------------------------------
+
+export type LogStats = {
+  todayTokens: number;
+  todayCost: number;
+  sessionTokens: number;
+  sessionCost: number;
+  ok: boolean; // false when the projects directory can't be read
+};
+
+// $ per single token (list price / 1e6). Edit if Anthropic changes pricing.
+const PRICING = {
+  opus: { in: 5 / 1e6, out: 25 / 1e6, cr: 0.5 / 1e6, cw: 6.25 / 1e6 },
+  opusLegacy: { in: 15 / 1e6, out: 75 / 1e6, cr: 1.5 / 1e6, cw: 18.75 / 1e6 },
+  sonnet: { in: 3 / 1e6, out: 15 / 1e6, cr: 0.3 / 1e6, cw: 3.75 / 1e6 },
+  haiku: { in: 1 / 1e6, out: 5 / 1e6, cr: 0.1 / 1e6, cw: 1.25 / 1e6 },
+};
+
+export function rateFor(model: string): (typeof PRICING)["opus"] {
+  const m = (model || "").toLowerCase();
+  if (m.includes("opus")) {
+    // Opus 4.5/4.6/4.7 (and any 5.x) use current pricing; Opus 4 / 4.0 / 4.1 are pricier.
+    if (/opus-4-[5-9]/.test(m) || /opus-[5-9]/.test(m)) return PRICING.opus;
+    return PRICING.opusLegacy;
+  }
+  if (m.includes("haiku")) return PRICING.haiku;
+  if (m.includes("sonnet")) return PRICING.sonnet;
+  return PRICING.sonnet; // sensible default
+}
+
+export function computeCost(u: Record<string, unknown>, model: string): number {
+  const r = rateFor(model);
+  return (
+    num(u.input_tokens, 0) * r.in +
+    num(u.output_tokens, 0) * r.out +
+    num(u.cache_read_input_tokens, 0) * r.cr +
+    num(u.cache_creation_input_tokens, 0) * r.cw
+  );
+}
+
+export function projectsDir(base?: string): string {
+  return join(base || homedir(), ".claude", "projects");
+}
+
+let logCache: { at: number; data: LogStats } | null = null;
+const LOG_TTL_MS = 30_000;
+
+async function listJsonl(dir: string): Promise<{ path: string; mtime: number }[]> {
+  const res: { path: string; mtime: number }[] = [];
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return res;
+  }
+  for (const ent of entries) {
+    const full = join(dir, ent.name);
+    if (ent.isDirectory()) {
+      res.push(...(await listJsonl(full)));
+    } else if (ent.isFile() && ent.name.endsWith(".jsonl")) {
+      try {
+        const s = await stat(full);
+        res.push({ path: full, mtime: s.mtimeMs });
+      } catch {
+        /* skip unreadable file */
+      }
+    }
+  }
+  return res;
+}
+
+export async function getLogStats(force = false, baseDir?: string): Promise<LogStats> {
+  const now = Date.now();
+  if (!force && !baseDir && logCache && now - logCache.at < LOG_TTL_MS) {
+    return logCache.data;
+  }
+
+  const out: LogStats = {
+    todayTokens: 0,
+    todayCost: 0,
+    sessionTokens: 0,
+    sessionCost: 0,
+    ok: true,
+  };
+
+  const files = await listJsonl(projectsDir(baseDir));
+  if (files.length === 0) {
+    // Could be "no logs yet" or "dir missing"; treat missing dir as not-ok.
+    let dirExists = true;
+    try {
+      await stat(projectsDir(baseDir));
+    } catch {
+      dirExists = false;
+    }
+    out.ok = dirExists;
+    if (!baseDir) logCache = { at: now, data: out };
+    return out;
+  }
+
+  files.sort((a, b) => b.mtime - a.mtime); // newest first
+  const sessionPath = files[0].path; // most-recently-active conversation
+  const todayStr = new Date().toDateString();
+  const startOfTodayMs = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
+
+  const seenToday = new Set<string>();
+  const seenSession = new Set<string>();
+
+  for (const f of files) {
+    // For "today" we only need files touched today; always read the session file.
+    if (f.mtime < startOfTodayMs && f.path !== sessionPath) continue;
+
+    let text: string;
+    try {
+      text = await readFile(f.path, "utf8");
+    } catch {
+      continue;
+    }
+
+    for (const line of text.split("\n")) {
+      if (!line) continue;
+      let e: any;
+      try {
+        e = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (e?.type !== "assistant" || !e?.message?.usage) continue;
+
+      const u = e.message.usage as Record<string, unknown>;
+      const model = (e.message.model as string) || "";
+      const key: string = e.requestId || e.message.id || "";
+      const tokens =
+        num(u.input_tokens, 0) +
+        num(u.output_tokens, 0) +
+        num(u.cache_creation_input_tokens, 0) +
+        num(u.cache_read_input_tokens, 0);
+      const cost = typeof e.costUSD === "number" ? e.costUSD : computeCost(u, model);
+
+      const ts = e.timestamp ? Date.parse(e.timestamp) : NaN;
+      const isToday = !Number.isNaN(ts) && new Date(ts).toDateString() === todayStr;
+      if (isToday) {
+        const k = "t:" + key;
+        if (!key || !seenToday.has(k)) {
+          if (key) seenToday.add(k);
+          out.todayTokens += tokens;
+          out.todayCost += cost;
+        }
+      }
+
+      if (f.path === sessionPath) {
+        const k = "s:" + key;
+        if (!key || !seenSession.has(k)) {
+          if (key) seenSession.add(k);
+          out.sessionTokens += tokens;
+          out.sessionCost += cost;
+        }
+      }
+    }
+  }
+
+  if (!baseDir) logCache = { at: now, data: out };
+  return out;
+}
+
+export function fmtTokens(n: number): string {
+  if (n >= 1e9) return (n / 1e9).toFixed(n >= 1e10 ? 0 : 1) + "B";
+  if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + "K";
+  return String(Math.round(n));
+}
+
+export function fmtCost(n: number): string {
+  if (n >= 1000) return "$" + (n / 1000).toFixed(1) + "k";
+  if (n >= 100) return "$" + n.toFixed(0);
+  if (n >= 10) return "$" + n.toFixed(1);
+  return "$" + n.toFixed(2);
+}
+
+// Stat tile: label on top, big value centered, scope subtitle below. No ring.
+export function svgStat(opts: {
+  label: string;
+  value: string;
+  sub: string;
+  accent: string;
+  stale: boolean;
+}): string {
+  const size = 144;
+  const cx = 72;
+  const len = opts.value.length;
+  const valSize = len <= 4 ? 40 : len === 5 ? 34 : 28;
+  const valBaseline = 82 + Math.round((40 - valSize) * 0.2);
+  const noteFill = opts.stale ? "#f59e0b" : "#9ca3af";
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+  <rect width="${size}" height="${size}" rx="20" fill="#0f1216"/>
+  <text x="${cx}" y="34" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700" fill="#e5e7eb">${esc(opts.label)}</text>
+  <rect x="${cx - 16}" y="42" width="32" height="3" rx="1.5" fill="${opts.accent}"/>
+  <text x="${cx}" y="${valBaseline}" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="${valSize}" font-weight="800" fill="#ffffff">${esc(opts.value)}</text>
+  <text x="${cx}" y="120" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" fill="${noteFill}">${esc(opts.sub)}</text>
+</svg>`;
 }

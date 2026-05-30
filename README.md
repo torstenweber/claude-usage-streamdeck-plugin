@@ -1,33 +1,38 @@
 # Claude Usage — Stream Deck plugin
 
-Shows your Claude **session (5h)** and **weekly (7d)** usage on Stream Deck keys —
-the same numbers Claude Code's `/usage` command reports. One configurable action;
-drop it on as many keys as you like and pick a metric per key.
+Shows your Claude usage on Stream Deck keys. One configurable action; drop it on
+as many keys as you like and pick a metric per key. Two families of metrics:
 
-![keys] Session · Weekly (all models) · Weekly Opus · Weekly Sonnet
-Each key shows a big % + a ring gauge + the reset countdown, color-coded
-green → amber → red. Updates every 60s; **tap any key to force a refresh now**.
+- **Limits (live)** — Session (5h), Weekly (7d), Weekly Opus, Weekly Sonnet.
+  Pulled from the same endpoint Claude Code's `/usage` uses. Shown as a big %
+  with a ring gauge and reset countdown, color-coded green → amber → red.
+- **Tokens & cost (local logs)** — Tokens today, Cost today, Tokens session,
+  Cost session. Parsed from Claude Code's JSONL transcripts on disk. Shown as a
+  big value (e.g. `1.2M`, `$8.40`) with a `today`/`session` subtitle.
+
+Updates every 60s; **tap any key to force a refresh now**. Works on **Windows and
+macOS**, and on both **Pro and Max** (metrics a plan doesn't report show `--`).
 
 ---
 
-## Install (Windows)
+## Install
 
-1. Make sure the **Stream Deck app is 6.5 or newer** (it ships the Node runtime
-   the plugin uses — you do **not** need Node.js installed separately).
-2. Double-click **`com.local.claude-usage.streamDeckPlugin`**. Stream Deck will
-   ask to install it — click **Install**.
-3. In Stream Deck, find the **Claude Usage** category in the actions list on the
-   right. Drag **Claude Usage** onto a key.
-4. With the key selected, open its settings (the panel below the canvas) and pick
-   a **Metric** (Session / Weekly / Opus / Sonnet). Repeat on more keys for the
-   others. Set the **amber** and **red** thresholds if you want (defaults 50/80).
+1. **Stream Deck app 6.5+** (it ships the Node runtime the plugin uses — you do
+   **not** need Node.js installed separately).
+2. Double-click **`com.local.claude-usage.streamDeckPlugin`** and click **Install**.
+3. In Stream Deck, open the **Claude Usage** category in the actions list and drag
+   **Claude Usage** onto a key.
+4. Select the key, open its settings (panel below the canvas), and pick a
+   **Metric**. Repeat on more keys for the others. The **amber/red** thresholds
+   (default 50/80) color the live limit gauges.
 
 That's it. Keys populate within a second or two of being placed.
 
-> **You must have logged into Claude Code at least once** on this machine, so the
-> credentials file exists. The plugin reads your token from
-> `%USERPROFILE%\.claude\.credentials.json` and never sends it anywhere except
-> Anthropic's own usage endpoint.
+> **Log in to Claude Code at least once** on this machine first, so the token
+> exists. The plugin reads it from `%USERPROFILE%\.claude\.credentials.json` on
+> Windows, or the **login Keychain** (`Claude Code-credentials`) on macOS, and
+> never sends it anywhere except Anthropic's own usage endpoint. Token/cost
+> metrics additionally read the local transcripts under `~/.claude/projects/`.
 
 ---
 
@@ -60,6 +65,16 @@ You should get JSON like:
 `utilization` is the percentage each key shows. On some plans `seven_day_opus`
 (or others) come back `null` — those keys will display `--`, which is expected.
 
+On **macOS**, the equivalent test (token comes from the Keychain):
+
+```bash
+TOKEN=$(security find-generic-password -s "Claude Code-credentials" -w | python3 -c 'import sys,json;print(json.load(sys.stdin)["claudeAiOauth"]["accessToken"])')
+curl -s https://api.anthropic.com/api/oauth/usage \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "anthropic-beta: oauth-2025-04-20" \
+  -H "User-Agent: claude-code/2.0.31" | python3 -m json.tool
+```
+
 ---
 
 ## Notes & gotchas
@@ -78,9 +93,22 @@ You should get JSON like:
   cached fetch per minute, so adding more keys doesn't multiply API calls.
 - **Pro vs Max.** Works on both. Max reports the Opus/Sonnet weekly breakdowns;
   Pro may not, in which case those keys read `--`.
-- **macOS** is not enabled in this build — on Mac the token lives in the Keychain,
-  not the file. Easy to add (a `security find-generic-password` read); ask if you
-  want it.
+- **macOS.** Supported. The token is read from the login Keychain
+  (`security find-generic-password -s "Claude Code-credentials"`), and the
+  transcripts from `~/.claude/projects/`. If a key shows `open Claude`, macOS may
+  be prompting for Keychain access — approve it (or run Claude Code once).
+- **Tokens & cost are best-effort.** They're parsed from Claude Code's local
+  JSONL logs, which have two known quirks:
+  - Claude Code currently under-records `input`/`output` tokens in the logs
+    (cache tokens are accurate), so token totals lean low and pure-compute cost
+    is a **lower bound**. To minimize this, cost prefers the per-message `costUSD`
+    Claude Code writes and only computes from tokens when that's missing.
+  - On **Pro/Max you don't pay per token** — the cost shown is *notional
+    "equivalent API spend"*, useful for relative sense, not a real charge.
+  - "Session" = your most-recently-active Claude Code conversation; "today" is by
+    local calendar day. Entries are de-duplicated by request id.
+  - Pricing for the compute fallback lives in `PRICING` in `src/usage-core.ts` —
+    edit it if Anthropic changes rates.
 
 ---
 
@@ -99,17 +127,16 @@ python3 make_icons.py   # only if you change the icon art
 Layout:
 
 ```
-src/usage-core.ts   token read + API fetch (cached) + metric/threshold/SVG logic
+src/usage-core.ts   token read (file + macOS Keychain), API fetch (cached),
+                    metric/threshold logic, JSONL token/cost parser, SVG renderers
 src/plugin.ts       Stream Deck wiring (action, 60s refresh loop, force-on-press)
 com.local.claude-usage.sdPlugin/
-  manifest.json     plugin + action definition (Node 20 runtime)
+  manifest.json     plugin + action definition (Node 20 runtime, Windows + macOS)
   bin/plugin.js     bundled output (regenerated by `npm run build`)
   ui/inspector.html settings panel (metric, thresholds, User-Agent)
   imgs/             icons
 ```
 
-### Want actual token counts / $ cost too?
-The OAuth endpoint only exposes **percentages**. Raw token counts and dollar cost
-live in Claude Code's local logs (`%USERPROFILE%\.claude\projects\**\*.jsonl`).
-A second metric type that parses those (à la `ccusage`) can be added to this same
-plugin — say the word and I'll wire up a "tokens today" / "session cost" key.
+To tweak the gauge look edit `svgKey`, the token/cost tiles edit `svgStat`, the
+metric definitions edit `METRICS` / the `LOG_METRICS` set in `plugin.ts`, and the
+cost fallback rates edit `PRICING` — all in `src/usage-core.ts`.

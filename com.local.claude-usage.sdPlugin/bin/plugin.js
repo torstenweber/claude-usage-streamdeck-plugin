@@ -17271,6 +17271,8 @@ var plugin_default = streamDeck;
 
 // src/usage-core.ts
 var import_node_fs4 = require("node:fs");
+var import_promises2 = require("node:fs/promises");
+var import_node_child_process = require("node:child_process");
 var import_node_os = require("node:os");
 var import_node_path6 = require("node:path");
 var ENDPOINT = "https://api.anthropic.com/api/oauth/usage";
@@ -17281,14 +17283,35 @@ function credentialsPath() {
   return (0, import_node_path6.join)((0, import_node_os.homedir)(), ".claude", ".credentials.json");
 }
 function readToken() {
+  if (process.platform === "darwin") {
+    const fromKeychain = readTokenFromKeychain();
+    if (fromKeychain.token) return fromKeychain;
+  }
+  return readTokenFromFile();
+}
+function parseCred(raw) {
+  const j = JSON.parse(raw);
+  const o = j && j.claudeAiOauth || {};
+  const token = o.accessToken;
+  const expiresAt = Number(o.expiresAt || 0);
+  const expired = expiresAt > 0 && Date.now() > expiresAt;
+  return { token, expired };
+}
+function readTokenFromFile() {
   try {
-    const raw = (0, import_node_fs4.readFileSync)(credentialsPath(), "utf8");
-    const j = JSON.parse(raw);
-    const o = j && j.claudeAiOauth || {};
-    const token = o.accessToken;
-    const expiresAt = Number(o.expiresAt || 0);
-    const expired = expiresAt > 0 && Date.now() > expiresAt;
-    return { token, expired };
+    return parseCred((0, import_node_fs4.readFileSync)(credentialsPath(), "utf8"));
+  } catch {
+    return {};
+  }
+}
+function readTokenFromKeychain() {
+  try {
+    const out = (0, import_node_child_process.execFileSync)(
+      "security",
+      ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
+      { encoding: "utf8", timeout: 4e3 }
+    );
+    return parseCred(out.trim());
   } catch {
     return {};
   }
@@ -17389,13 +17412,168 @@ function svgKey(opts) {
 function toDataUri(svg) {
   return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
 }
+var PRICING = {
+  opus: { in: 5 / 1e6, out: 25 / 1e6, cr: 0.5 / 1e6, cw: 6.25 / 1e6 },
+  opusLegacy: { in: 15 / 1e6, out: 75 / 1e6, cr: 1.5 / 1e6, cw: 18.75 / 1e6 },
+  sonnet: { in: 3 / 1e6, out: 15 / 1e6, cr: 0.3 / 1e6, cw: 3.75 / 1e6 },
+  haiku: { in: 1 / 1e6, out: 5 / 1e6, cr: 0.1 / 1e6, cw: 1.25 / 1e6 }
+};
+function rateFor(model) {
+  const m = (model || "").toLowerCase();
+  if (m.includes("opus")) {
+    if (/opus-4-[5-9]/.test(m) || /opus-[5-9]/.test(m)) return PRICING.opus;
+    return PRICING.opusLegacy;
+  }
+  if (m.includes("haiku")) return PRICING.haiku;
+  if (m.includes("sonnet")) return PRICING.sonnet;
+  return PRICING.sonnet;
+}
+function computeCost(u, model) {
+  const r = rateFor(model);
+  return num(u.input_tokens, 0) * r.in + num(u.output_tokens, 0) * r.out + num(u.cache_read_input_tokens, 0) * r.cr + num(u.cache_creation_input_tokens, 0) * r.cw;
+}
+function projectsDir(base) {
+  return (0, import_node_path6.join)(base || (0, import_node_os.homedir)(), ".claude", "projects");
+}
+var logCache = null;
+var LOG_TTL_MS = 3e4;
+async function listJsonl(dir) {
+  const res = [];
+  let entries;
+  try {
+    entries = await (0, import_promises2.readdir)(dir, { withFileTypes: true });
+  } catch {
+    return res;
+  }
+  for (const ent of entries) {
+    const full = (0, import_node_path6.join)(dir, ent.name);
+    if (ent.isDirectory()) {
+      res.push(...await listJsonl(full));
+    } else if (ent.isFile() && ent.name.endsWith(".jsonl")) {
+      try {
+        const s = await (0, import_promises2.stat)(full);
+        res.push({ path: full, mtime: s.mtimeMs });
+      } catch {
+      }
+    }
+  }
+  return res;
+}
+async function getLogStats(force = false, baseDir) {
+  const now = Date.now();
+  if (!force && !baseDir && logCache && now - logCache.at < LOG_TTL_MS) {
+    return logCache.data;
+  }
+  const out = {
+    todayTokens: 0,
+    todayCost: 0,
+    sessionTokens: 0,
+    sessionCost: 0,
+    ok: true
+  };
+  const files = await listJsonl(projectsDir(baseDir));
+  if (files.length === 0) {
+    let dirExists = true;
+    try {
+      await (0, import_promises2.stat)(projectsDir(baseDir));
+    } catch {
+      dirExists = false;
+    }
+    out.ok = dirExists;
+    if (!baseDir) logCache = { at: now, data: out };
+    return out;
+  }
+  files.sort((a, b) => b.mtime - a.mtime);
+  const sessionPath = files[0].path;
+  const todayStr = (/* @__PURE__ */ new Date()).toDateString();
+  const startOfTodayMs = new Date((/* @__PURE__ */ new Date()).setHours(0, 0, 0, 0)).getTime();
+  const seenToday = /* @__PURE__ */ new Set();
+  const seenSession = /* @__PURE__ */ new Set();
+  for (const f of files) {
+    if (f.mtime < startOfTodayMs && f.path !== sessionPath) continue;
+    let text;
+    try {
+      text = await (0, import_promises2.readFile)(f.path, "utf8");
+    } catch {
+      continue;
+    }
+    for (const line of text.split("\n")) {
+      if (!line) continue;
+      let e;
+      try {
+        e = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (e?.type !== "assistant" || !e?.message?.usage) continue;
+      const u = e.message.usage;
+      const model = e.message.model || "";
+      const key = e.requestId || e.message.id || "";
+      const tokens = num(u.input_tokens, 0) + num(u.output_tokens, 0) + num(u.cache_creation_input_tokens, 0) + num(u.cache_read_input_tokens, 0);
+      const cost = typeof e.costUSD === "number" ? e.costUSD : computeCost(u, model);
+      const ts = e.timestamp ? Date.parse(e.timestamp) : NaN;
+      const isToday = !Number.isNaN(ts) && new Date(ts).toDateString() === todayStr;
+      if (isToday) {
+        const k = "t:" + key;
+        if (!key || !seenToday.has(k)) {
+          if (key) seenToday.add(k);
+          out.todayTokens += tokens;
+          out.todayCost += cost;
+        }
+      }
+      if (f.path === sessionPath) {
+        const k = "s:" + key;
+        if (!key || !seenSession.has(k)) {
+          if (key) seenSession.add(k);
+          out.sessionTokens += tokens;
+          out.sessionCost += cost;
+        }
+      }
+    }
+  }
+  if (!baseDir) logCache = { at: now, data: out };
+  return out;
+}
+function fmtTokens(n) {
+  if (n >= 1e9) return (n / 1e9).toFixed(n >= 1e10 ? 0 : 1) + "B";
+  if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + "K";
+  return String(Math.round(n));
+}
+function fmtCost(n) {
+  if (n >= 1e3) return "$" + (n / 1e3).toFixed(1) + "k";
+  if (n >= 100) return "$" + n.toFixed(0);
+  if (n >= 10) return "$" + n.toFixed(1);
+  return "$" + n.toFixed(2);
+}
+function svgStat(opts) {
+  const size = 144;
+  const cx = 72;
+  const len = opts.value.length;
+  const valSize = len <= 4 ? 40 : len === 5 ? 34 : 28;
+  const valBaseline = 82 + Math.round((40 - valSize) * 0.2);
+  const noteFill = opts.stale ? "#f59e0b" : "#9ca3af";
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+  <rect width="${size}" height="${size}" rx="20" fill="#0f1216"/>
+  <text x="${cx}" y="34" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700" fill="#e5e7eb">${esc2(opts.label)}</text>
+  <rect x="${cx - 16}" y="42" width="32" height="3" rx="1.5" fill="${opts.accent}"/>
+  <text x="${cx}" y="${valBaseline}" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="${valSize}" font-weight="800" fill="#ffffff">${esc2(opts.value)}</text>
+  <text x="${cx}" y="120" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" fill="${noteFill}">${esc2(opts.sub)}</text>
+</svg>`;
+}
 
 // src/plugin.ts
+var ACCENT = "#d97757";
+var LOG_METRICS = /* @__PURE__ */ new Set(["tokens_today", "cost_today", "tokens_session", "cost_session"]);
 var visible = /* @__PURE__ */ new Set();
 async function draw(act, s) {
+  const metric = s.metric || "session";
+  if (LOG_METRICS.has(metric)) return drawStat(act, metric);
+  return drawGauge(act, s, metric);
+}
+async function drawGauge(act, s, metric) {
   const ua = s.userAgent && s.userAgent.trim() || DEFAULT_UA;
   const { data, error: error40 } = await fetchUsage(ua, false);
-  const metric = s.metric || "session";
   const warn = num(s.warn, 50);
   const crit = num(s.crit, 80);
   if (!data) {
@@ -17412,8 +17590,40 @@ async function draw(act, s) {
     toDataUri(svgKey({ label, pct, note, col: color(pct, warn, crit), stale }))
   );
 }
+async function drawStat(act, metric) {
+  const stats = await getLogStats(false);
+  if (!stats.ok) {
+    await act.setImage(
+      toDataUri(svgStat({ label: "Claude", value: "--", sub: "no logs", accent: ACCENT, stale: true }))
+    );
+    return;
+  }
+  let label = "Tokens";
+  let value = "--";
+  let sub = "today";
+  if (metric === "tokens_today") {
+    label = "Tokens";
+    value = fmtTokens(stats.todayTokens);
+    sub = "today";
+  } else if (metric === "cost_today") {
+    label = "Cost";
+    value = fmtCost(stats.todayCost);
+    sub = "today";
+  } else if (metric === "tokens_session") {
+    label = "Tokens";
+    value = fmtTokens(stats.sessionTokens);
+    sub = "session";
+  } else if (metric === "cost_session") {
+    label = "Cost";
+    value = fmtCost(stats.sessionCost);
+    sub = "session";
+  }
+  await act.setImage(
+    toDataUri(svgStat({ label, value, sub, accent: ACCENT, stale: false }))
+  );
+}
 async function refreshAll(force) {
-  await fetchUsage(DEFAULT_UA, force);
+  await Promise.allSettled([fetchUsage(DEFAULT_UA, force), getLogStats(force)]);
   for (const act of visible) {
     try {
       const s = await act.getSettings();

@@ -63,6 +63,7 @@ a:hover {
 img {
   display: block;
   max-width: 100%;
+  height: auto;
 }
 
 /* ---------- Global nav ---------- */
@@ -269,6 +270,8 @@ h3 {
 
 .hero__shot {
   display: block;
+  width: 100%;
+  height: auto;
   margin: 64px auto 0;
   max-width: 1000px;
   border-radius: 18px;

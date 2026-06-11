@@ -6,7 +6,7 @@ like and pick a metric per key. Tap any key to force a refresh.
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
 ![Platforms](https://img.shields.io/badge/run%20on-macOS%20%7C%20Windows-blue.svg)
-![Stream Deck](https://img.shields.io/badge/Stream%20Deck-6.5%2B-black.svg)
+![Stream Deck](https://img.shields.io/badge/Stream%20Deck-6.9%2B-black.svg)
 ![Node](https://img.shields.io/badge/build%20with-Node%2020%2B-339933.svg)
 
 ![Claude Usage keys on a Stream Deck: a row of Session, Weekly, Opus and Sonnet limit gauges, then Tokens and Cost tiles](docs/preview.png)
@@ -49,7 +49,7 @@ Live limits are color-coded green → amber → red. Updates run every 60s, and
 ## Requirements
 
 **To run:** the official [Elgato Stream Deck app](https://www.elgato.com/downloads)
-**6.5 or newer** — it ships the Node runtime the plugin uses, so you do **not**
+**6.9 or newer** — it ships the Node runtime the plugin uses, so you do **not**
 need Node.js installed separately. Runs on **Windows 10+** and **macOS 12+**, and
 on both **Pro and Max** (metrics a plan doesn't report show `--`).
 
@@ -69,7 +69,7 @@ on both **Pro and Max** (metrics a plan doesn't report show `--`).
 
 ## Install
 
-1. **Stream Deck app 6.5+** installed (see [Requirements](#requirements)).
+1. **Stream Deck app 6.9+** installed (see [Requirements](#requirements)).
 2. Double-click **`com.saeedkolivand.claude-usage.streamDeckPlugin`** and click **Install**.
 3. In Stream Deck, open the **Claude Usage** category in the actions list and drag
    **Claude Usage** onto a key.

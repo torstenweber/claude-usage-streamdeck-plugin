@@ -30,7 +30,7 @@ body:
     id: sd-version
     attributes:
       label: Stream Deck app version
-      placeholder: "6.5"
+      placeholder: "6.9"
     validations:
       required: true
   - type: input

@@ -57,9 +57,7 @@ body:
       label: Which metric is affected?
       options:
         - Session (5h)
-        - Weekly — all models (7d)
-        - Weekly — Opus (7d)
-        - Weekly — Sonnet (7d)
+        - Weekly (7d)
         - Tokens — today
         - Cost — today
         - Tokens — week (7d)

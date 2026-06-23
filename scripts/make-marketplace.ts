@@ -34,8 +34,6 @@ const KEY = 144; // native key size
 const GAUGES = [
   svgKey({ label: "Session", pct: 33, note: "2h 14m", col: color(33, WARN, CRIT), stale: false }),
   svgKey({ label: "Weekly", pct: 61, note: "4d 6h", col: color(61, WARN, CRIT), stale: false }),
-  svgKey({ label: "Opus 7d", pct: 84, note: "4d 6h", col: color(84, WARN, CRIT), stale: false }),
-  svgKey({ label: "Sonn 7d", pct: 12, note: "4d 6h", col: color(12, WARN, CRIT), stale: false }),
 ];
 const STATS = [
   svgStat({ label: "Tokens", value: "1.2M", sub: "today", accent: ACCENT, stale: false }),

@@ -13,8 +13,6 @@ export type UsageNode = { utilization: number; resets_at: string | null };
 export type UsageData = {
   five_hour?: UsageNode | null;
   seven_day?: UsageNode | null;
-  seven_day_opus?: UsageNode | null;
-  seven_day_sonnet?: UsageNode | null;
   [k: string]: unknown;
 };
 
@@ -104,8 +102,6 @@ export async function fetchUsage(ua: string, force = false): Promise<FetchResult
 export const METRICS: Record<string, { label: string; key: keyof UsageData }> = {
   session: { label: "Session", key: "five_hour" },
   weekly: { label: "Weekly", key: "seven_day" },
-  weekly_opus: { label: "Opus 7d", key: "seven_day_opus" },
-  weekly_sonnet: { label: "Sonn 7d", key: "seven_day_sonnet" },
 };
 
 export function pickMetric(
@@ -220,12 +216,12 @@ const PRICING = {
 export type ModelFamily = "opus" | "opus-legacy" | "sonnet" | "haiku" | "unknown";
 
 // Reduce whatever model id Claude Code recorded in its logs to just the family
-// (e.g. "claude-opus-4-6-2026..." -> "opus"). Version-agnostic on purpose, so
+// (e.g. "claude-opus-4-8-2026..." -> "opus"). Version-agnostic on purpose, so
 // new releases within a family are picked up automatically without code changes.
 export function modelFamily(model: string): ModelFamily {
   const m = (model || "").toLowerCase();
   if (m.includes("opus")) {
-    // Opus 4.5/4.6/4.7+ (and any 5.x) use current pricing; Opus 4 / 4.0 / 4.1 cost more.
+    // Opus 4.5–4.8+ (and any 5.x) use current pricing; Opus 4 / 4.0 / 4.1 cost more.
     return /opus-4-[5-9]/.test(m) || /opus-[5-9]/.test(m) ? "opus" : "opus-legacy";
   }
   if (m.includes("sonnet")) return "sonnet";

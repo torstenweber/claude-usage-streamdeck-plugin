@@ -24,8 +24,6 @@ const CRIT = 80; // default gauge thresholds, so colors match the real green→a
 const VARIANTS: { slug: string; svg: string }[] = [
 	{ slug: "session", svg: svgKey({ label: "Session", pct: 33, note: "2h 14m", col: color(33, WARN, CRIT), stale: false }) },
 	{ slug: "weekly", svg: svgKey({ label: "Weekly", pct: 61, note: "4d 6h", col: color(61, WARN, CRIT), stale: false }) },
-	{ slug: "opus-7d", svg: svgKey({ label: "Opus 7d", pct: 84, note: "4d 6h", col: color(84, WARN, CRIT), stale: false }) },
-	{ slug: "sonnet-7d", svg: svgKey({ label: "Sonn 7d", pct: 12, note: "4d 6h", col: color(12, WARN, CRIT), stale: false }) },
 	{ slug: "tokens-today", svg: svgStat({ label: "Tokens", value: "1.2M", sub: "today", accent: ACCENT, stale: false }) },
 	{ slug: "cost-7d", svg: svgStat({ label: "Cost", value: "$8.40", sub: "7 days", accent: ACCENT, stale: false }) },
 	{ slug: "tokens-session", svg: svgStat({ label: "Tokens", value: "318K", sub: "session", accent: ACCENT, stale: false }) },

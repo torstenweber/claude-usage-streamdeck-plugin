@@ -307,6 +307,11 @@ h3 {
   max-width: 760px;
 }
 
+.cards--2 {
+  grid-template-columns: repeat(2, 1fr);
+  max-width: 520px;
+}
+
 .card {
   margin: 0;
 }

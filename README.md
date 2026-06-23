@@ -9,7 +9,7 @@ like and pick a metric per key. Tap any key to force a refresh.
 ![Stream Deck](https://img.shields.io/badge/Stream%20Deck-6.9%2B-black.svg)
 ![Node](https://img.shields.io/badge/build%20with-Node%2020%2B-339933.svg)
 
-![Claude Usage keys on a Stream Deck: a row of Session, Weekly, Opus and Sonnet limit gauges, then Tokens and Cost tiles](docs/preview.png)
+![Claude Usage keys on a Stream Deck: Session and Weekly limit gauges, then Tokens and Cost tiles](docs/preview.png)
 
 ---
 
@@ -38,8 +38,6 @@ at once. Two families:
 | --- | --- | --- | --- |
 | **Session (5h)** | Limit (live) | `oauth/usage` endpoint (same as Claude Code's `/usage`) | big % + ring gauge + reset countdown |
 | **Weekly (7d)** | Limit (live) | same endpoint | big % + ring gauge + reset countdown |
-| **Weekly Opus** | Limit (live) | same endpoint | big % (or `--` if your plan doesn't report it) |
-| **Weekly Sonnet** | Limit (live) | same endpoint | big % (or `--`) |
 | **Tokens** | Local logs | Claude Code JSONL transcripts on disk | big value (e.g. `1.2M`) + `today` / `7 days` / `session` |
 | **Cost** | Local logs | Claude Code JSONL transcripts on disk | big value (e.g. `$8.40`) + `today` / `7 days` / `session` |
 
@@ -84,7 +82,7 @@ Select the key, then open its property inspector (panel below the canvas):
 
 | Field | What it does |
 | --- | --- |
-| **Metric** | Which value the key shows: Session / Weekly / Weekly Opus / Weekly Sonnet (live limits), or Tokens / Cost for today / 7 days / session. |
+| **Metric** | Which value the key shows: Session / Weekly (live limits), or Tokens / Cost for today / 7 days / session. |
 | **Amber threshold** | % where a live limit gauge turns amber (default `50`). |
 | **Red threshold** | % where a live limit gauge turns red (default `80`). |
 | **User-Agent** (Advanced) | Sent to the usage endpoint; must start with `claude-code/` (default `claude-code/2.0.31`). Bump it if Anthropic ever tightens the check. |
@@ -108,15 +106,13 @@ You should get JSON like:
 
 ```json
 {
-  "five_hour":       { "utilization": 33.0, "resets_at": "2026-..." },
-  "seven_day":       { "utilization": 13.0, "resets_at": "2026-..." },
-  "seven_day_opus":  { "utilization": 12.0, "resets_at": "2026-..." },
-  "seven_day_sonnet":{ "utilization": 1.0,  "resets_at": "2026-..." }
+  "five_hour": { "utilization": 33.0, "resets_at": "2026-..." },
+  "seven_day": { "utilization": 13.0, "resets_at": "2026-..." }
 }
 ```
 
-`utilization` is the percentage each key shows. On some plans `seven_day_opus`
-(or others) come back `null` — those keys will display `--`, which is expected.
+`utilization` is the percentage each key shows. If a field comes back `null`
+the key displays `--`, which is expected.
 
 ### macOS
 
@@ -156,8 +152,7 @@ curl -s https://api.anthropic.com/api/oauth/usage \
   Claude Code once to refresh, and the keys recover on the next tick.
 - **One network call, not four.** All your Claude Usage keys share a single
   cached fetch per minute, so adding more keys doesn't multiply API calls.
-- **Pro vs Max.** Works on both. Max reports the Opus/Sonnet weekly breakdowns;
-  Pro may not, in which case those keys read `--`.
+- **Pro vs Max.** Works on both — Session and Weekly limits report on either plan.
 - **macOS.** Supported. The token is read from the login Keychain
   (`security find-generic-password -s "Claude Code-credentials"`), and the
   transcripts from `~/.claude/projects/`. If a key shows `open Claude`, macOS may

@@ -17382,9 +17382,7 @@ async function fetchUsage(ua, force = false) {
 }
 var METRICS = {
   session: { label: "Session", key: "five_hour" },
-  weekly: { label: "Weekly", key: "seven_day" },
-  weekly_opus: { label: "Opus 7d", key: "seven_day_opus" },
-  weekly_sonnet: { label: "Sonn 7d", key: "seven_day_sonnet" }
+  weekly: { label: "Weekly", key: "seven_day" }
 };
 function pickMetric(data, metric) {
   const m = METRICS[metric] || METRICS.session;

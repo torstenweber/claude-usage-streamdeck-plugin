@@ -8,6 +8,7 @@ like and pick a metric per key. Tap any key to force a refresh.
 ![Platforms](https://img.shields.io/badge/run%20on-macOS%20%7C%20Windows-blue.svg)
 ![Stream Deck](https://img.shields.io/badge/Stream%20Deck-6.9%2B-black.svg)
 ![Node](https://img.shields.io/badge/build%20with-Node%2020%2B-339933.svg)
+[![Elgato Marketplace](https://img.shields.io/badge/Elgato%20Marketplace-Available-d97757.svg)](https://marketplace.elgato.com/product/ai-coding-usage-meter-f4aa1012-a57b-4a02-9b90-a37004678ee7)
 
 ![Claude Usage keys on a Stream Deck: Session and Weekly limit gauges, then Tokens and Cost tiles](docs/preview.png)
 
@@ -67,10 +68,16 @@ on both **Pro and Max** (metrics a plan doesn't report show `--`).
 
 ## Install
 
+**From the [Elgato Marketplace](https://marketplace.elgato.com/product/ai-coding-usage-meter-f4aa1012-a57b-4a02-9b90-a37004678ee7)** — open the link and click **Get**; it installs straight into the Stream Deck app. Easiest path, and you get updates automatically.
+
+Or install the packaged file manually:
+
 1. **Stream Deck app 6.9+** installed (see [Requirements](#requirements)).
-2. Double-click **`com.saeedkolivand.claude-usage.streamDeckPlugin`** and click **Install**.
-3. In Stream Deck, open the **Claude Usage** category in the actions list and drag
-   **Claude Usage** onto a key.
+2. Download `com.saeedkolivand.claude-usage.streamDeckPlugin` from the
+   [latest release](https://github.com/saeedkolivand/claude-usage-streamdeck-plugin/releases/latest)
+   and double-click it → **Install**.
+3. In Stream Deck, open the **AI Coding Usage Meter** category in the actions list
+   and drag **Usage Meter** onto a key.
 4. Select the key and pick a **Metric** in its settings (see [Configure](#configure)).
    Repeat on more keys for the others.
 

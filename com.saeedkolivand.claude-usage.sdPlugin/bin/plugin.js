@@ -17316,7 +17316,9 @@ var DEFAULT_UA = "claude-code/2.0.31";
 var CACHE_TTL_MS = 55e3;
 var cache = { at: 0, data: null };
 var STALE_AFTER_MS = 3 * 6e4;
+var lastFail = null;
 function failResult(error40) {
+  lastFail = { at: Date.now(), error: error40 };
   return {
     data: cache.data,
     error: error40,
@@ -17365,6 +17367,13 @@ async function fetchUsage(ua, force = false) {
   if (!force && cache.data && now - cache.at < CACHE_TTL_MS) {
     return { data: cache.data };
   }
+  if (!force && lastFail && now - lastFail.at < CACHE_TTL_MS) {
+    return {
+      data: cache.data,
+      error: lastFail.error,
+      stale: cache.data != null && now - cache.at > STALE_AFTER_MS
+    };
+  }
   const { token, expired } = readToken();
   if (!token) return failResult("no-token");
   if (expired) return failResult("token-expired");
@@ -17384,6 +17393,7 @@ async function fetchUsage(ua, force = false) {
     if (!res.ok) return failResult(`http-${res.status}`);
     const data = await res.json();
     cache = { at: now, data };
+    lastFail = null;
     return { data };
   } catch {
     return failResult("network");

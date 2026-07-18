@@ -30,7 +30,15 @@ let cache: { at: number; data: UsageData | null } = { at: 0, data: null };
 // scale with the number of keys, not with elapsed time.
 const STALE_AFTER_MS = 3 * 60_000;
 
+// After a failed attempt, hold off further automatic retries for a full cache
+// window. Without this the failure path *raises* the request rate: a failure
+// leaves cache.at untouched, so every visible key's redraw fires its own
+// retry — exactly when the API is asking for less (rate limits, outages).
+// A manual key tap passes force=true and still retries immediately.
+let lastFail: { at: number; error: string } | null = null;
+
 function failResult(error: string): FetchResult {
+  lastFail = { at: Date.now(), error };
   return {
     data: cache.data,
     error,
@@ -90,6 +98,14 @@ export async function fetchUsage(ua: string, force = false): Promise<FetchResult
   if (!force && cache.data && now - cache.at < CACHE_TTL_MS) {
     return { data: cache.data };
   }
+  // Failure cooldown: serve the cache and the last error instead of retrying.
+  if (!force && lastFail && now - lastFail.at < CACHE_TTL_MS) {
+    return {
+      data: cache.data,
+      error: lastFail.error,
+      stale: cache.data != null && now - cache.at > STALE_AFTER_MS,
+    };
+  }
   const { token, expired } = readToken();
   if (!token) return failResult("no-token");
   // A token the credentials already mark as expired guarantees a 401 — skip
@@ -112,6 +128,7 @@ export async function fetchUsage(ua: string, force = false): Promise<FetchResult
     if (!res.ok) return failResult(`http-${res.status}`);
     const data = (await res.json()) as UsageData;
     cache = { at: now, data };
+    lastFail = null;
     return { data };
   } catch {
     return failResult("network");
